@@ -1,0 +1,305 @@
+## ======================================
+##      made by weiyw @ 2019-12-19
+##    Email:     weiyw17@gmail.com
+## ======================================
+
+from rsf.proj import *
+import os
+cwd = os.getcwd()
+
+## parameters ===========================
+model_num    = 16
+shot_num     = 15
+channel_num  = 4
+channel_name = ['vz', 'vx', 'div', 'curl']
+depth1       = 15
+depth2       = 65 
+depth3       = 115
+nx           = 801
+nz           = 467
+dx           = 10
+dz           = 10
+dt           = 0.0005
+nr           = 126
+nt           = 12004
+pow1         = 2
+if_routine   = True
+if_plot      = False
+if_plotmodel = False
+if_spectrum  = False
+if_contrast  = False
+if_single_tr = False
+if_pow       = True
+if_snap_plot = False
+if_shift     = False
+snap_step    = 200
+it_start     = snap_step * 2
+it_end       = snap_step * int(nt / snap_step)
+snap_range   = range(it_start, it_end, snap_step)
+
+dir_seismo   = "seismo"
+dir_spec     = "seismo_spectrum"
+dir_down     = "seismo_down"
+dir_pown     = "seismo_pow"
+dir_shift    = "seismo_shift"
+
+## functions ===========================
+def get_grey(Title):
+  return '''
+  grey color=owb title=%s 
+  screenratio=1.4 screenht=10 labelsz=6 titlesz=6 font=2 
+  pclip=97 pad=n
+  scalebar=y ''' % Title
+
+def plot_model(Title, sb):
+  return '''
+  grey color=owb title=%s 
+  screenratio=0.5 screenht=6 labelsz=6 titlesz=6 font=2 
+  pclip=99 pad=n
+  scalebar=%s ''' % (Title, sb) 
+
+def get_graph(Title):
+  return '''
+  graph title=%s 
+  font=2 labelsz=6 screenratio=2.0 screenht=10 titlesz=6 
+  transp=y yreverse=y
+  label2="Amplitude" label1="Time" unit1=s unit2=""
+  transp=y yreverse=y
+  min2=-2e-7 max2=2e-7
+  ''' % Title
+
+def plot_spec(Title):
+  return '''
+  graph title=%s font=2 labelsz=6 
+  label1="Frequency"  label2="" uni1=Hz
+  ''' % Title
+
+def plot_wiggle(Title):
+  return '''
+  wiggle title=%s  
+  screenratio=0.6 screenht=10 labelsz=6 titlesz=6 font=2 
+  label2="Amplitude"  o2=0 
+  ''' % Title
+
+
+## main  ==============================
+for this_model in range(model_num):
+
+  ## plot model
+  if if_plotmodel:
+    in_model = "modelfile_" + str(this_model) + ".bin"
+    out_model = "model/" + str(this_model)
+    Flow(out_model, '', '''
+        echo n1=3 n2=%g n3=%g in=%s data_format=native_float |
+        window f1=0 n1=1 |
+        put d2=%g d1=%g label2=Depth label1=Distance unit1=m unit2=m |
+        transp
+        '''% (nx, nz, os.path.join(cwd, in_model), dz, dx) )
+    Result(out_model, plot_model("P-wave\ velocity\ model", 'y'))
+
+
+
+
+  for this_shot in range(shot_num):
+    for this_channel in range(channel_num):
+
+      if if_routine:
+        rawd_name="output/model_"+str(this_model)+"_shot_"+\
+            str(this_shot)+"_"+str(channel_name[this_channel]) + ".bin"
+        file_name = "/model_" + str(this_model) \
+          + "_shot_" + str(this_shot) + "_" + channel_name[this_channel]
+        in_name = dir_seismo + file_name
+        out_name = in_name + "_plot_ready"
+        spec = in_name + "_sprectrum"
+        down = in_name + "_downSamp"
+        pown = in_name + "_afterpow" # rsf file name
+        pown_dir = os.path.join( dir_pown, channel_name[this_channel] ) + \
+          file_name + "_afterpow" # binary file position and name
+        shift = in_name + "_aftershift_" # rsf file name
+        shift_dir = os.path.join( dir_shift, channel_name[this_channel] ) + \
+          file_name + "_aftershift_" # binary file position and name
+      
+        ## routine processing
+        Flow(in_name+".rsf",'' , '''
+        echo in=%s n1=%g n2=%g 
+        data_format=native_float
+        ''' % ( os.path.join(cwd, rawd_name), nr, nt)  )
+
+        Flow(out_name, in_name, '''
+          put o1=500 d1=20 label1=Depth unit1=m 
+            o2=0 d2=%g label2=Time unit2=s |
+          transp plane=12 
+          ''' % dt )
+        
+        Flow(down, out_name, '''
+          bandpass fhi=500 |
+          window j1=4 
+          ''')
+        if if_plot:
+          tit=channel_name[this_channel] + "\ of\ shot\ " + \
+              str(this_shot) + "\ model\ " + str(this_model)
+          if if_contrast:
+            Result(out_name, get_grey(tit))
+          Result(down, get_grey(tit))
+      
+      
+      # processing by pow
+      if if_pow:
+        Flow(pown, down, '''
+          pow pow1=%g |
+          scale axis=1 
+          datapath=%s
+          ''' % (pow1, os.path.join(cwd, pown_dir) ) ) # mkdir before hand
+        if if_plot:
+          titp="after\ pow\ " + channel_name[this_channel] + "\ of\ shot\ " + \
+              str(this_shot) + "\ model\ " + str(this_model)
+          Result(pown, get_grey(titp))
+
+
+      if if_shift:
+        tmp_index = 0
+        for it in range(12):
+          for ix in range(5):
+            ssit = -1500 + it * 250
+            ssix = -60 + ix * 30 
+            Flow(shift+str(tmp_index), pown, '''
+              rotate rot1=%g rot2=%g
+              datapath=%s
+              ''' % (ssit, ssix, os.path.join(cwd, shift_dir) + str(tmp_index) ) ) # mkdir before hand
+            if if_plot:
+              titp="after\ shift\ " + channel_name[this_channel] + "\ of\ shot\ " + \
+                  str(this_shot) + "\ model\ " + str(this_model)
+              Result(shift+str(tmp_index), get_grey(titp))
+            tmp_index += 1
+
+
+      # get spectrum
+      if if_spectrum:
+        Flow(spec, out_name, 'spectra')
+        if if_plot:
+          tits=channel_name[this_channel] + "\ of\ shot\ " + \
+              str(this_shot) + "\ model\ " + str(this_model)
+          Result(spec, plot_spec('spectrum\ '+tits) )
+      
+
+      ## contrast
+      if if_contrast:
+        depthcom=depth1
+        Flow(out_name + "_trace_1", out_name, '''
+          sfwindow f2=%g n2=1 ''' % depthcom )
+        tit2 = "single\ trace\ in\ depth\ of\ " + str(depthcom*20+500) + "\ " + tit
+        Result(out_name+"_trace_1", get_graph(tit2) )
+        Flow(down + "_trace_1", down, '''
+          sfwindow f2=%g n2=1 ''' % depthcom )
+        tit2 = "single\ trace\ in\ depth\ of\ " + \
+            str(depthcom*20+500) + "\ down\ sampling\ " + tit
+        Result(down+"_trace_1", get_graph(tit2) )
+        Flow(out_name+"_trace1_com", [out_name+"_trace_1", down+"_trace_1"], 'cat')
+        Flow(out_name+"_trace1_err", out_name+"_trace_1", \
+            'diff match=%s' % down+"_trace_1.rsf")
+        tit3 = "contrast of traces between before and after down sampling depth: " \
+            + str(depthcom*20+500) 
+        Result(out_name+"_trace1_com", plot_wiggle([tit3]))
+        #Result(out_name+"_trace1_err", plot_wiggle([tit3]))
+      
+      
+      ## single trace
+      if if_single_tr:
+        target=down
+        Flow(target + "_trace_1", target, '''
+          sfwindow f2=%g n2=1 ''' % depth1 )
+        tit2 = "single\ trace\ in\ depth\ of\ " + str(depth1*20+500) + "\ " + tit
+        Result(target+"_trace_1", get_graph(tit2) )
+
+        Flow(target + "_trace_2", target, '''
+          sfwindow f2=%g n2=1 ''' % depth2 )
+        tit2 = "single\ trace\ in\ depth\ of\ " + str(depth2*20+500) + "\ " + tit
+        Result(target+"_trace_2", get_graph(tit2) )
+
+        Flow(target + "_trace_3", target, '''
+          sfwindow f2=%g n2=1 ''' % depth3 )
+        tit2 = "single\ trace\ in\ depth\ of\ " + str(depth3*20+500) + "\ " + tit
+        Result(target+"_trace_3", get_graph(tit2) )
+
+        if if_pow:
+          target=pown
+          Flow(target + "_trace_1", target, '''
+            sfwindow f2=%g n2=1 ''' % depth1 )
+          tit2 = "single\ trace\ after\ pow\ in\ depth\ of\ " + str(depth1*20+500) + "\ " + tit
+          Result(target+"_trace_1", get_graph(tit2) )
+
+          Flow(target + "_trace_2", target, '''
+            sfwindow f2=%g n2=1 ''' % depth2 )
+          tit2 = "single\ trace\ after\ pow\ in\ depth\ of\ " + str(depth2*20+500) + "\ " + tit
+          Result(target+"_trace_2", get_graph(tit2) )
+
+          Flow(target + "_trace_3", target, '''
+            sfwindow f2=%g n2=1 ''' % depth3 )
+          tit2 = "single\ trace\ after\ pow\ in\ depth\ of\ " + str(depth3*20+500) + "\ " + tit
+          Result(target+"_trace_3", get_graph(tit2) )
+
+
+
+#      if if_plotmodel:
+#        in_model = "modelfile_" + str(this_model) + ".bin"
+#        out_model = "model/" + str(this_model)
+#        Flow(out_model, '', '''
+#            echo n1=3 n2=%g n3=%g in=%s data_format=native_float |
+#            window f1=0 n1=1 |
+#            put d3=%g d2=%g label3=Depth label2=Distance 
+#            '''% (nx, nz, os.path.join(cwd, in_model), dz, dx) )
+##        Flow(out_model+"trans", out_model, '''
+##              transp plane=13 
+##              ''')
+#        Result(out_model, plot_model("P-wave\ velocity\ model", 'n'))
+
+      if if_snap_plot:
+        index = 0
+        name_list = []
+        for it in snap_range:
+          snap_name = "snap_output/model_" + str(this_model) + "_shot_" + \
+              str(this_shot) + "_it_" + str(it) + "_" + \
+              channel_name[this_channel] + ".bin"
+          out_name = "snap_plot_model_" + str(this_model) + \
+              "_shot_" + str(this_shot) + \
+              "_" + channel_name[this_channel] + \
+              "/it_" + str(index).zfill(8) 
+          titw = 'time\(s\)\ ' + str(float(it)*dt)
+
+          Flow(out_name, '', '''
+            echo n1=%g n2=%g d1=%g d2=%g label1=Depth label2=Distance 
+              in=%s data_format=native_float  | 
+            math tau=%s output="-5e-12*tau+input"  
+            '''% (nz, nx, dz, dx, os.path.join(cwd, snap_name), \
+               out_model+".rsf" ))
+            #'''% (nz, nx, dz, dx, os.path.join(cwd, snap_name), titw ) )
+
+          #titw="time\(s\)\ " + str(float(it) * dt)
+          Result(out_name, plot_model( titw , 'n') ) 
+
+          tit='spike/spike'+str(index).zfill(8)
+          Flow(tit,'','''
+            spike n1=%g n2=%g nsp=1 mag=100
+              k1=%g l1=%g k2=0 l2=%g 
+              ''' % (nt, nr, it, it+snap_step, nr))
+          Result(tit, '''
+            sfgrey color=owb wantaxis=n wanttitle=n 
+              screenht=6 screenratio=1.4
+          ''')
+          
+          titall='combine/com_' + str(index).zfill(8)
+          inntmp= 'Fig/'+out_name + " Fig/" + tit
+          #Result(titall, inntmp, 'SideBySideAniso')
+          #Result(titall, inntmp, 'TwoColumns')
+          name_list.append(out_name)
+          index += 1
+        
+        Flow('snap_combine', name_list, ''' 
+            cat in=${SOURCES[0:-1]} 
+            ''' )
+        Result('snap_combine', '''
+          grey color=jet pclip=97 maxval=1e-14 minval=-1e-14
+          wanttitle=n
+          screenratio=0.5 screenht=6 labelsz=6 titlesz=6 font=2 
+          gainpanel=a 
+          ''' )
